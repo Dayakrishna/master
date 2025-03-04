@@ -1,5 +1,6 @@
-datetime
-numpy
-openpyxl
-pandas
 streamlit
+pandas
+plotly
+openpyxl
+xlsxwriter
+datetime
