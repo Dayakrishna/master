@@ -46,7 +46,7 @@ if selected_team == "EZX Team Summary":
         st.markdown(f"""
             <style>
             .flip-box {{
-                font-size: 120px;  /* Very Large Flip Counter */
+                font-size: 100px;  /* Very Large Flip Counter */
                 font-weight: bold;
                 text-align: left;
                 color: black;
