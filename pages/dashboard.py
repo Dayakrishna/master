@@ -7,7 +7,9 @@ import plotly.express as px
 # Set Page Configurations
 st.set_page_config(page_title="Workload Dashboard", layout="wide")
 
-
+with st.sidebar:
+    st.image("logo.png", width=150)  # Sidebar logo
+    st.markdown("## Navigation")
 # Load Processed Excel File
 file_path = "Workload_Summary.xlsx"
 
@@ -44,7 +46,7 @@ if selected_team == "EZX Team Summary":
         st.markdown(f"""
             <style>
             .flip-box {{
-                font-size: 160px;  /* Very Large Flip Counter */
+                font-size: 120px;  /* Very Large Flip Counter */
                 font-weight: bold;
                 text-align: left;
                 color: black;
@@ -76,7 +78,8 @@ if selected_team == "EZX Team Summary":
                     labels=["Achieved", "Remaining"],
                     values=[achieved, remaining],
                     hole=0.4,
-                    textinfo="none",  # Hide default labels
+                    textinfo="none",  # ✅ Hide all values & percentages
+                    hoverinfo="none",  # ✅ Disable hover values
                     marker=dict(colors=[team_colors[i], "#D3D3D3"]),  # Custom Colors
                 )
             ])
@@ -111,8 +114,7 @@ if selected_team == "EZX Team Summary":
 
 else:
     # Show Selected Team Data
-    df_selected = df_team[df_team["Team Name"].str.contains(selected_team, case=False)]
-    st.dataframe(df_selected)
+    pass
 
 # Back to Upload Page
 st.sidebar.markdown("[⬅ Back to Upload Page](http://localhost:8501/)", unsafe_allow_html=True)
@@ -367,6 +369,26 @@ if selected_team == "EZX Team Summary":
         textposition='auto',
         marker=dict(color=["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd"]),  # Custom team colors
     ))
+
+    # **Add 75% Dotted Target Line**
+    fig_overall.add_shape(
+        type="line",
+        x0=df_overall_productivity["Team"].iloc[0],  # Start from first team
+        x1=df_overall_productivity["Team"].iloc[-1],  # End at last team
+        y0=75,
+        y1=75,
+        line=dict(color="red", width=2, dash="dot"),  # Red dotted line for 75% target
+    )
+
+    # **Add Annotation for Target Line**
+    fig_overall.add_annotation(
+        x=df_overall_productivity["Team"].iloc[-1],  # Position at the last team
+        y=75,
+        text="🎯 Target: 75%",
+        showarrow=False,
+        font=dict(size=12, color="red"),
+        bgcolor="white",
+    )
 
     # Customize layout
     fig_overall.update_layout(
