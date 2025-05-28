@@ -1,5 +1,7 @@
-streamlit
-pandas
+streamlit~=1.42.1
+pandas~=2.2.3
 openpyxl
-pillow
+pillow~=11.1.0
 xlsxwriter
+
+plotly~=6.0.0
