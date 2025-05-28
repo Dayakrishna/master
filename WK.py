@@ -1,336 +1,171 @@
 import streamlit as st
 import pandas as pd
-import datetime
+from io import BytesIO
+from datetime import datetime
+import re
 
-# Streamlit App Title
-st.title("Workload Distribution Dashboard")
+# --- CONFIG ---
+st.set_page_config(page_title="QuickBooks Timesheet Cleaner", layout="centered")
 
-# Upload First File (Workload Data)
-st.subheader("Upload Workload Data")
-workload_file = st.file_uploader("Upload the first Excel file (Workload Data)", type=["xlsx", "xls"])
+from PIL import Image
 
-# Upload Second File (Employee Details)
-st.subheader("Upload Employee Details Data")
-employee_file = st.file_uploader("Upload the second Excel file (Employee Details)", type=["xlsx", "xls"])
+logo_image = Image.open("logo.png")
+st.sidebar.image(logo_image, width=180)
 
-# Upload Third File (Additional Data if needed)
-st.subheader("Upload Additional Data")
-additional_file = st.file_uploader("Upload an additional Excel file", type=["xlsx", "xls"])
+# --- HEADER ---
+logo_url = Image.open("logo.png")
+st.markdown(
+    f"""
+    <div style='display: flex; align-items: center; justify-content: space-between;'>
+        <img src="{logo_url}" width="180">
+        <h2 style='color: #2c3e50;'>QuickBooks Timesheet Data Cleaning</h2>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+st.markdown("---")
 
-# Step 1: Load and Display Raw Additional Data
-if additional_file:
-    st.subheader("Step 1: Load and Display Raw Additional Data")
+# --- FILE UPLOADS ---
+st.subheader("📤 Upload Your QuickBooks Timesheet File")
+uploaded_file = st.file_uploader("Choose Excel or CSV file", type=["xlsx", "xls", "csv"], key="timesheet")
 
-    # Read Additional Data
-    df_additional = pd.read_excel(additional_file, dtype=str)
+st.subheader("📤 Upload Designation Mapping File")
+designation_file = st.file_uploader("Upload Designation Excel (Employee Name, Team Name, Position, USD/Hr)", type=["xlsx", "xls"], key="designation")
 
-    # Display Raw Additional Data
-    st.write("### Raw Additional Data (Before Cleaning)")
-    st.dataframe(df_additional.head(10))  # Show first 10 rows
-
-    # Step 2: Delete First Column (Column A) Before Cleaning
-    st.subheader("Step 2: Delete First Column Before Cleaning")
-
-    # Drop the first column (Column A)
-    df_additional = df_additional.iloc[:, 1:]
-
-    # Step 3: Remove First 3 Rows and Set Headers
-    st.subheader("Step 3: Remove First 3 Rows and Set Headers")
-
-    # Remove first 3 rows
-    df_additional = df_additional.iloc[3:].reset_index(drop=True)
-
-    # Set the 4th row (now index 0) as column headers
-    df_additional.columns = df_additional.iloc[0]  # Use first row as headers
-    df_additional = df_additional[1:].reset_index(drop=True)  # Remove the old header row
-
-    # Drop duplicate column names (if any exist)
-    df_additional = df_additional.loc[:, ~df_additional.columns.duplicated()]
-
-    # Rename NaN columns to "Unnamed_X" to avoid errors
-    df_additional.columns = [f"Unnamed_{i}" if pd.isna(col) else col for i, col in enumerate(df_additional.columns)]
-
-    # Step 4: Remove Rows Where Column "Num" Has No Value
-    st.subheader("Step 4: Remove Rows Where 'Num' is Empty")
-
-    # Ensure "Num" column exists before filtering
-    if "Num" in df_additional.columns:
-        df_additional = df_additional[
-            df_additional["Num"].notna() & (df_additional["Num"].astype(str).str.strip() != "")]
+if uploaded_file:
+    if uploaded_file.name.endswith(".csv"):
+        df = pd.read_csv(uploaded_file, skiprows=4)
     else:
-        st.warning("Column 'Num' not found in the dataset.")
+        df = pd.read_excel(uploaded_file, skiprows=4)
 
-    # Step 5: Keep Only Required Columns ("Num", "Amount", "Project Manager")
-    st.subheader("Step 5: Keep Only 'Num', 'Amount', and 'Project Manager' Columns")
+    original_columns = df.columns.tolist()
+    if original_columns:
+        df.rename(columns={original_columns[0]: "Employee Name"}, inplace=True)
 
-    # Ensure required columns exist before filtering
-    required_columns = ["Num", "Amount", "Project Manager"]
-    if all(col in df_additional.columns for col in required_columns):
-        df_additional = df_additional[required_columns]
-    else:
-        missing_cols = [col for col in required_columns if col not in df_additional.columns]
-        st.warning(f"Some required columns are missing: {missing_cols}. Keeping all columns.")
+    if "Employee Name" in df.columns:
+        df["Employee Name"] = df["Employee Name"].fillna(method="ffill")
+        df["Employee Name"] = df["Employee Name"].str.replace(r"^\*", "", regex=True).str.strip()
 
-    # Step 6: Delete First Column Again **(Only if it is NOT 'Num')**
-    st.subheader("Step 6: Delete First Column Again (If Not 'Num')")
+    if "Product/Service full name" in df.columns:
+        df["Product/Service full name"] = df["Product/Service full name"].str.replace(r"^Internal:", "", regex=True).str.strip()
+        df["Product/Service full name"] = df["Product/Service full name"].apply(
+            lambda x: "Time off" if str(x).strip().startswith("Time off:") else x
+        )
+        roles_to_convert = [
+            "Rates:Application Engineer I", "Rates:Senior Engineer I", "Rates:Application Engineer II",
+            "Rates:Principal Engineer I", "Rates:Senior Director", "Rates:Intern",
+            "Rates:Director/Principal Engineer- II", "Rates:Admin Assistant", "Rates:Senior Engineer II",
+            "Rates:Assistant Application Engineer", "Rates:CAD Designer"
+        ]
+        df["Product/Service full name"] = df["Product/Service full name"].apply(
+            lambda x: "Projects" if str(x).strip() in roles_to_convert else x
+        )
 
-    # Ensure we do not delete 'Num' by mistake
-    if df_additional.columns[0] != "Num":
-        df_additional = df_additional.iloc[:, 1:]
-    else:
-        st.info("Skipped deleting the first column because it's 'Num'.")
+    if "Client full name" in df.columns and "Product/Service full name" in df.columns:
+        df["Product/Service full name"] = df.apply(
+            lambda row: "Internal Billable"
+            if str(row["Client full name"]).startswith("Enerzinx LLC:") else row["Product/Service full name"],
+            axis=1
+        )
 
-    # Step 7: Clean "Num" Column by Removing "1037-" Prefix
-    st.subheader("Step 7: Remove '1037-' Prefix from 'Num' Column")
+    if "Activity date" in df.columns:
+        df["Activity date"] = pd.to_datetime(df["Activity date"], format="%m/%d/%Y", errors="coerce")
+        df["Activity date"] = df["Activity date"].dt.strftime("%d/%m/%Y")
+        base_date = datetime.strptime("30/12/2024", "%d/%m/%Y")
+        activity_dates = pd.to_datetime(df["Activity date"], format="%d/%m/%Y", errors="coerce")
+        df["Week Number"] = activity_dates.apply(lambda d: f"Week {(d - base_date).days // 7 + 1}" if pd.notnull(d) and (d - base_date).days >= 0 else "Before Week 1")
 
-    # Ensure "Num" column exists before modifying
-    if "Num" in df_additional.columns:
-        df_additional["Num"] = df_additional["Num"].str.replace("^1037-", "",
-                                                                regex=True)  # Removes "1037-" only if it appears at the start
-    else:
-        st.warning("Column 'Num' not found in the dataset.")
-    if workload_file and employee_file:
-        # Read Workload Data
-        df_workload = pd.read_excel(workload_file, header=None, dtype=str)
-        df_workload = df_workload.iloc[4:].reset_index(drop=True)  # Delete first 4 rows
-        df_workload.iloc[:, 0] = df_workload.iloc[:, 0].fillna(method='ffill').str.replace("*", "",
-                                                                                           regex=False).str.strip()
-
-        # Set Headers for Workload Data
-        workload_headers = ["Employee Name"] + df_workload.iloc[0, 1:].tolist()
-        df_workload = df_workload[1:].reset_index(drop=True)
-        df_workload.columns = [str(col).strip() for col in workload_headers]  # Trim column names
-
-        # Read Employee Details Data
-        df_employee = pd.read_excel(employee_file, dtype=str)
-        df_employee.columns = [col.strip() for col in df_employee.columns]  # Trim column names
-
-        # Debug: Print Column Names Before Merging
-        st.write("🔍 Workload Data Columns:", df_workload.columns.tolist())
-        st.write("🔍 Employee Data Columns:", df_employee.columns.tolist())
-
-        # Ensure "Employee Name" exists before merging
-        if "Employee Name" not in df_workload.columns:
-            st.error("❌ 'Employee Name' missing in Workload Data!")
-        if "Employee Name" not in df_employee.columns:
-            st.error("❌ 'Employee Name' missing in Employee Data!")
-
-        # ✅ Merge Workload & Employee Data (Already Fixed)
-        if "Employee Name" in df_workload.columns and "Employee Name" in df_employee.columns:
-            df_merged = df_workload.merge(df_employee, on="Employee Name", how="inner")
-            st.success("✅ df_merged successfully created!")
-
-            # ✅ Store df_merged in Session State for Analytics Page
-            if "df_merged" not in st.session_state:
-                st.session_state["df_merged"] = None  # Initialize if missing
-
-            if df_merged is not None:
-                st.session_state["df_merged"] = df_merged
-                st.success("✅ df_merged stored successfully in session state!")
-            else:
-                st.warning("⚠️ df_merged could not be stored in session state. Check for issues in merging.")
-
-            # ✅ Debugging: Show stored session data
-            st.write("🔍 Debugging Session State:")
-            st.write("df_additional stored:",
-                     "✅ Available" if st.session_state.get('df_additional') is not None else "❌ Not Available")
-            st.write("df_merged stored:",
-                     "✅ Available" if st.session_state.get('df_merged') is not None else "❌ Not Available")
-    # ✅ Step 1: Debugging `df_additional` Before Storing in Session State
-    if additional_file:
-        st.subheader("🔍 Step 1: Checking df_additional before storing...")
-
-        if 'df_additional' in locals():
-            st.write("✅ df_additional exists before session state storage!")
-            st.write("🔍 df_additional Columns:", df_additional.columns.tolist())
-            st.write("🔍 First 5 Rows:")
-            st.dataframe(df_additional.head())  # Show first 5 rows to confirm data
-        else:
-            st.error("❌ df_additional is missing! Check data processing steps.")
-    # ✅ Step 2: Store df_additional in Session State for Analytics Page
-    if "df_additional" not in st.session_state:
-        st.session_state["df_additional"] = None  # Initialize if missing
-
-    if additional_file and "df_additional" in locals():
-        st.session_state["df_additional"] = df_additional
-        st.success("✅ df_additional stored successfully in session state!")
-    else:
-        st.warning(
-            "⚠️ df_additional could not be stored in session state. Check for missing file or processing issues.")
-
-    # ✅ Debugging: Show stored session data
-    st.write("🔍 Debugging Session State:")
-    st.write("df_additional stored:",
-             "✅ Available" if st.session_state.get('df_additional') is not None else "❌ Not Available")
-    st.write("df_merged stored:", "✅ Available" if st.session_state.get('df_merged') is not None else "❌ Not Available")
-
-    # Display Final Cleaned Data
-    st.write("### Final Cleaned Additional Data")
-    st.dataframe(df_additional)  # Show full cleaned dataset
-
-if workload_file and employee_file:
-    # Read Workload Data
-    df_workload = pd.read_excel(workload_file, header=None, dtype=str)
-    df_workload = df_workload.iloc[4:].reset_index(drop=True)  # Delete first 4 rows
-    df_workload.iloc[:, 0] = df_workload.iloc[:, 0].fillna(method='ffill').str.replace("*", "", regex=False).str.strip()
-
-    # Set Headers for Workload Data
-    workload_headers = ["Employee Name"] + df_workload.iloc[0, 1:].tolist()
-    df_workload = df_workload[1:].reset_index(drop=True)
-    df_workload.columns = [str(col).strip() for col in workload_headers]  # Trim column names
-
-    # Remove Unwanted Columns
-    columns_to_remove = ["Rates", "Billable", "Amount"]
-    df_workload = df_workload.drop(columns=[col for col in columns_to_remove if col in df_workload.columns], errors="ignore")
-
-    # Remove Rows Where "Product/Service" is Empty
-    if "Product/Service" in df_workload.columns:
-        df_workload = df_workload[df_workload["Product/Service"].notna() & (df_workload["Product/Service"].str.strip() != "")]
-
-    # Convert "Activity Date" to Correct Format (DD-MM-YYYY)
-    if "Activity Date" in df_workload.columns:
-        def parse_date(date_str):
-            try:
-                if date_str.isnumeric() and len(date_str) > 10:
-                    date_obj = pd.to_datetime(int(date_str), unit='ns')
-                else:
-                    date_obj = pd.to_datetime(date_str, errors='coerce', infer_datetime_format=True)
-                return date_obj.strftime("%d-%m-%Y") if pd.notna(date_obj) else None
-            except:
-                return None
-
-        df_workload["Activity Date"] = df_workload["Activity Date"].astype(str).apply(parse_date)
-
-        # Add "Week Number" Column
-        def calculate_week_number(date_str):
-            try:
-                if date_str:
-                    date = datetime.datetime.strptime(date_str, "%d-%m-%Y")
-                    week_1_start = datetime.datetime(2024, 12, 30)
-                    return ((date - week_1_start).days // 7) + 1
-            except:
-                return None
-            return None
-
-        df_workload["Week Number"] = df_workload["Activity Date"].apply(calculate_week_number)
-
-    # Normalize "Product/Service"
-    if "Product/Service" in df_workload.columns:
-        def normalize_product_service(value):
-            if pd.isna(value):
-                return value
-            value = value.strip()
-
-            if value.startswith("Internal:Self Development") or \
-                    value.startswith("Internal:Internal Technical Project Discussion") or \
-                    value.startswith("Internal:Admin - Meetings") or \
-                    value.startswith("Internal:Administrative"):
-                return "Administrative"
-            elif value.startswith("Internal:Time off:"):
-                return "Time off"
-            elif value.startswith("Rates:") or "Senior Engineer" in value:
-                return "Projects"
-            return value
-
-        df_workload["Product/Service"] = df_workload["Product/Service"].apply(normalize_product_service)
-        # Modify Product/Service when Client starts with "Enerzinx LLC:"
-        if "Client" in df_workload.columns and "Product/Service" in df_workload.columns:
-            df_workload.loc[df_workload["Client"].str.startswith("Enerzinx LLC:",
-                                                                 na=False), "Product/Service"] = "Internal Billable"
-
-    # Read Employee Details Data
-    df_employee = pd.read_excel(employee_file, dtype=str)
-    df_employee.columns = [col.strip() for col in df_employee.columns]
-
-    # Select Required Columns from Employee Data
-    columns_to_merge = ["Employee Name", "Team Name", "Position", "USD per Hour", "Work_Week_Percentage", "USD Calculation"]
-    df_employee = df_employee[columns_to_merge]
-
-    # Merge Workload Data with Employee Data
-    df_merged = df_workload.merge(df_employee, on="Employee Name", how="inner")
-
-    # Convert Numeric Columns
-    for col in df_merged.columns:
+    # --- Merge Designation File ---
+    if designation_file:
         try:
-            df_merged[col] = pd.to_numeric(df_merged[col], errors='ignore')
+            designation_df = pd.read_excel(designation_file)
+            if "Employee Name" in designation_df.columns:
+                designation_df["Employee Name"] = designation_df["Employee Name"].str.strip()
+                designation_df = designation_df[["Employee Name", "Team Name", "Position", "USD/Hr"]]
+                df = pd.merge(df, designation_df, how="left", on="Employee Name")
+                st.success("✅ Designation data merged successfully.")
+            else:
+                st.error("❌ 'Employee Name' not found in designation file.")
+        except Exception as e:
+            st.error(f"❌ Error reading designation file: {e}")
+
+    def parse_duration_to_hours(duration_str):
+        try:
+            if pd.isnull(duration_str):
+                return 0
+            if isinstance(duration_str, (float, int)):
+                return float(duration_str)
+            match = re.match(r'^\s*(\d{1,2}):(\d{2})\s*$', str(duration_str).strip())
+            if match:
+                return int(match.group(1)) + int(match.group(2)) / 60
+            return 0
         except:
-            pass
+            return 0
 
-    # **Create Weekly Summary**
-    df_summary = df_employee.copy()
-    max_week = df_merged["Week Number"].max()
+    if "Duration" in df.columns:
+        df["Hours"] = df["Duration"].apply(parse_duration_to_hours)
+        if "USD/Hr" in df.columns and "Product/Service full name" in df.columns:
+            df["Projects USD"] = df.apply(
+                lambda row: row["USD/Hr"] * row["Hours"] if row["Product/Service full name"] == "Projects" else 0,
+                axis=1
+            )
+            df["Projects USD"] = df["Projects USD"].round(2)
 
-    # Group by Employee Name and Summarize Duration for Projects
-    df_projects = df_merged[df_merged["Product/Service"] == "Projects"]
-    df_projects_summary = df_projects.groupby(["Employee Name", "Week Number"])["Duration"].sum().unstack(fill_value=0)
-    df_projects_summary.columns = [f"Week {col}" for col in df_projects_summary.columns]
+    st.success("✅ Data cleaned successfully.")
+    st.write("### 🔍 Preview of Cleaned Data", df.head())
 
-    # Group by Employee Name and Summarize Time Off Duration
-    df_time_off = df_merged[df_merged["Product/Service"] == "Time off"]
-    df_time_off_summary = df_time_off.groupby(["Employee Name", "Week Number"])["Duration"].sum().unstack(fill_value=0)
-    df_time_off_summary.columns = [f"Av Week {col}" for col in df_time_off_summary.columns]
+    # Optional tools
+    st.markdown("### ✨ Optional Cleaning Tools")
+    if st.checkbox("Trim Whitespace from All Text Columns"):
+        df = df.applymap(lambda x: x.strip() if isinstance(x, str) else x)
+        st.success("Whitespace trimmed.")
 
-    # Merge with Employee Data
-    df_summary = df_summary.merge(df_projects_summary, on="Employee Name", how="left").fillna(0)
-    df_summary = df_summary.merge(df_time_off_summary, on="Employee Name", how="left").fillna(0)
+    missing_action = st.selectbox("Handle Missing Values", ["Do Nothing", "Fill with 'Unknown'", "Fill with 0", "Drop Rows"])
+    if missing_action == "Fill with 'Unknown'":
+        df = df.fillna("Unknown")
+    elif missing_action == "Fill with 0":
+        df = df.fillna(0)
+    elif missing_action == "Drop Rows":
+        df = df.dropna()
 
-    # Calculate "Av Week X" as 40 - (Time Off Hours)
-    for week in range(1, max_week + 1):
-        df_summary[f"Av Week {week}"] = 40 - df_summary.get(f"Av Week {week}", 0)
+    if st.checkbox("Remove Duplicate Rows"):
+        df = df.drop_duplicates()
+        st.success("Duplicates removed.")
 
-    # Ensure "USD per Hour" is Numeric
-    df_summary["USD per Hour"] = pd.to_numeric(df_summary["USD per Hour"], errors="coerce").fillna(0)
+    st.write("### 🧾 Final Cleaned Data Preview", df.head())
 
-    # Calculate Target Achieved as sum of (Week X * USD per Hour)
-    df_summary["Target Achieved"] = sum(
-        df_summary.get(f"Week {week}", 0) * df_summary["USD per Hour"] for week in range(1, max_week + 1)
+    # Download Cleaned File
+    def convert_df_to_excel(dataframe):
+        output = BytesIO()
+        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+            dataframe.to_excel(writer, index=False)
+        return output.getvalue()
+
+    st.download_button(
+        label="📥 Download Cleaned File",
+        data=convert_df_to_excel(df),
+        file_name="cleaned_timesheet.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
 
-    # **Create Team Summary**
-    df_team_summary = df_summary.groupby("Team Name").agg({"Target Achieved": "sum"}).reset_index()
-    team_target_values = {
-        "Sagar & Team": 2020408.16,
-        "Vinoth & Team": 1653061.22,
-        "Dr. Suresh & Team": 1959183.67,
-        "Praveen & Team": 2693877.55,
-        "Jigar & Team": 673469.39
-    }
-    df_team_summary["Team Target"] = df_team_summary["Team Name"].map(team_target_values)
-    df_team_summary["Remaining Target"] = df_team_summary["Team Target"] - df_team_summary["Target Achieved"]
+    # Save to session state and file
+    try:
+        if (
+            "Projects USD" in df.columns and
+            designation_file is not None and
+            'designation_df' in locals() and
+            "Employee Name" in designation_df.columns
+        ):
+            st.session_state["cleaned_df"] = df.copy()
+            st.session_state["designation_df"] = designation_df.copy()
 
-    # Add Total Row (EZX Team)
-    total_row = pd.DataFrame({
-        "Team Name": ["EZX Team"],
-        "Target Achieved": [df_team_summary["Target Achieved"].sum()],
-        "Team Target": [df_team_summary["Team Target"].sum()],
-        "Remaining Target": [df_team_summary["Remaining Target"].sum()]
-    })
-    df_team_summary = pd.concat([df_team_summary, total_row], ignore_index=True)
+            # ✅ Save cleaned file to disk for dashboard fallback
+            df.to_excel("cleaned_data.xlsx", index=False)
 
-    # Save & Download Button
-    output_file = "Workload_Summary.xlsx"
-    with pd.ExcelWriter(output_file, engine="xlsxwriter") as writer:
-        df_merged.to_excel(writer, sheet_name="Master Data", index=False)
-        df_summary.to_excel(writer, sheet_name="Weekly Summary", index=False)
-        df_team_summary.to_excel(writer, sheet_name="Team Summary", index=False)
-
-    with open(output_file, "rb") as f:
-        st.download_button("Download Processed Excel File", f, "Workload_Summary.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-
-    # Display Data
-    st.subheader("Weekly Summary")
-    st.dataframe(df_summary)
-    st.subheader("Team Summary")
-    st.dataframe(df_team_summary)
-
-    # **Extra Download Button at Bottom**
-    with open(output_file, "rb") as f:
-        st.download_button("⬇️ Download Again", f, "Workload_Summary.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-# Dashboard Navigation Button
-st.page_link("pages/dashboard.py", label="📊 Go to Dashboard", icon="📊")
-
-st.markdown("[📊 Go to Dashboard](http://localhost:8501/dashboard)", unsafe_allow_html=True)
-# Navigation Button to Analytics Page
-st.page_link("pages/analytics.py", label="📊 Go to Analytics", icon="📊")
-
-st.markdown("[📊 Go to Analytics](http://localhost:8501/analytics)", unsafe_allow_html=True)
+            st.markdown("---")
+            st.success("✅ Data prepared and stored for dashboard access.")
+            st.page_link("1_Dashboard", label="📊 Go to Team Dashboard", icon="📈")
+    except Exception as e:
+        st.warning(f"⚠️ Could not prepare dashboard view: {e}")
+else:
+    st.info("Please upload a QuickBooks timesheet to begin.")
