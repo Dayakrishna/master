@@ -9,11 +9,11 @@ st.set_page_config(page_title="Enerzinx Dashboard", layout="wide")
 st.markdown("<h1 style='text-align: center;'>Enerzinx Dashboard</h1>", unsafe_allow_html=True)
 
 manual_targets = {
-    "Sagar & Team": 1776583,
-    "Vinoth & Team": 1490919,
-    "Dr. Suresh & Team": 1686230,
-    "Praveen & Team": 2612396,
-    "Jigar & Team": 685764.7,
+    "Sagar & Team": 1758314,
+    "Vinoth & Team": 1568139,
+    "Dr. Suresh & Team": 1668889,
+    "Praveen & Team": 2585532,
+    "Jigar & Team": 678712,
     "Dr. Amritpal Singh & Team": 748107
 }
 
