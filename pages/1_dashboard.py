@@ -11,8 +11,8 @@ st.markdown("<h1 style='text-align: center;'>Enerzinx Dashboard</h1>", unsafe_al
 manual_targets = {
     "Sagar & Team": 1758314,
     "Vinoth & Team": 1568139,
-    "Dr. Suresh & Team": 1668889,
-    "Praveen & Team": 2585532,
+    "Dr. Suresh & Team": 1997849,
+    "Praveen & Team": 2575532,
     "Jigar & Team": 678712,
     "Dr. Amritpal Singh & Team": 748107
 }
